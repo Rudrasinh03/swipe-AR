@@ -21,41 +21,87 @@
         init: function () {
             this.total = 10;
             this.index = 1;
+            this.isAnimating = false; // Prevents fast, repeated swipes
+            this.transitionDuration = 200; // Milliseconds for fade (adjust for speed)
             this.carouselEl = this.el;
 
             this.showSlide = this.showSlide.bind(this);
-            this.handleSwipeLeft = this.handleSwipeLeft.bind(this);
-            this.handleSwipeRight = this.handleSwipeRight.bind(this);
-            
+            this.handleSwipe = this.handleSwipe.bind(this); // Combine swipe handlers
+            this.animateSlide = this.animateSlide.bind(this);
+
             this.showSlide(this.index);
 
             // Listen for the gesture events
-            this.carouselEl.addEventListener("swipeleft", this.handleSwipeLeft);
-            this.carouselEl.addEventListener("swiperight", this.handleSwipeRight);
+            this.carouselEl.addEventListener("swipeleft", () => this.handleSwipe('LEFT'));
+            this.carouselEl.addEventListener("swiperight", () => this.handleSwipe('RIGHT'));
         },
 
         showSlide: function (i) {
             for (let x = 1; x <= this.total; x++) {
                 const el = document.querySelector("#slide" + x);
                 if (el) {
+                    // Always ensure the previous slide is hidden correctly
                     el.setAttribute("visible", x === i);
+                    // Set opacity to 1 for the current slide
+                    if (x === i) {
+                        el.setAttribute('material', 'opacity', 1);
+                    }
                 }
             }
         },
 
-        handleSwipeLeft: function () {
-            this.index = this.index === this.total ? 1 : this.index + 1;
-            this.showSlide(this.index);
-        },
+        handleSwipe: function (direction) {
+            if (this.isAnimating) return; // Ignore new swipe if already animating
+            this.isAnimating = true;
 
-        handleSwipeRight: function () {
-            this.index = this.index === 1 ? this.total : this.index - 1;
-            this.showSlide(this.index);
+            const nextIndex = direction === 'LEFT'
+                ? (this.index === this.total ? 1 : this.index + 1)
+                : (this.index === 1 ? this.total : this.index - 1);
+
+            this.animateSlide(this.index, nextIndex);
         },
         
+        // ⭐ NEW FUNCTION: Handles the fade out/in animation
+        animateSlide: function (currentIndex, nextIndex) {
+            const currentEl = document.querySelector("#slide" + currentIndex);
+            const nextEl = document.querySelector("#slide" + nextIndex);
+
+            // 1. Fade OUT the current slide
+            currentEl.setAttribute('animation__fadeout', {
+                property: 'material.opacity',
+                to: 0,
+                dur: this.transitionDuration,
+                easing: 'linear',
+            });
+            
+            // Wait for fade out to complete (using setTimeout for simplicity)
+            setTimeout(() => {
+                // 2. Hide the old slide and update the index
+                currentEl.setAttribute('visible', false);
+                this.index = nextIndex;
+
+                // 3. Prepare and Fade IN the next slide
+                nextEl.setAttribute('visible', true);
+                nextEl.setAttribute('material', 'opacity', 0); // Start transparent
+
+                nextEl.setAttribute('animation__fadein', {
+                    property: 'material.opacity',
+                    to: 1,
+                    dur: this.transitionDuration,
+                    easing: 'linear',
+                });
+
+                // Wait for fade in to complete
+                setTimeout(() => {
+                    this.isAnimating = false; // Ready for the next swipe
+                }, this.transitionDuration);
+
+            }, this.transitionDuration);
+        },
+
         remove: function() {
-            this.carouselEl.removeEventListener("swipeleft", this.handleSwipeLeft);
-            this.carouselEl.removeEventListener("swiperight", this.handleSwipeRight);
+            this.carouselEl.removeEventListener("swipeleft", () => this.handleSwipe('LEFT'));
+            this.carouselEl.removeEventListener("swiperight", () => this.handleSwipe('RIGHT'));
         }
     });
 
@@ -67,7 +113,6 @@
             target.addEventListener("targetFound", () => {
                 carousel.setAttribute("visible", true);
             });
-
             target.addEventListener("targetLost", () => {
                 carousel.setAttribute("visible", false);
             });
@@ -85,15 +130,9 @@
     device-orientation-permission-ui="enabled: false">
 
     <a-assets timeout="5000">
-        <img id="img1" src="img1.jpg" />
-        <img id="img2" src="img2.jpg" />
-        <img id="img3" src="img3.jpg" />
-        <img id="img4" src="img4.jpg" />
-        <img id="img5" src="img5.jpg" />
-        <img id="img6" src="img6.jpg" />
-        <img id="img7" src="img7.jpg" />
-        <img id="img8" src="img8.jpg" />
-        <img id="img9" src="img9.jpg" />
+        <img id="img1" src="img1.jpg" /><img id="img2" src="img2.jpg" /><img id="img3" src="img3.jpg" />
+        <img id="img4" src="img4.jpg" /><img id="img5" src="img5.jpg" /><img id="img6" src="img6.jpg" />
+        <img id="img7" src="img7.jpg" /><img id="img8" src="img8.jpg" /><img id="img9" src="img9.jpg" />
         <img id="img10" src="img10.jpg" />
     </a-assets>
 
