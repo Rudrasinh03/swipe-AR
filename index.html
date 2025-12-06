@@ -6,122 +6,130 @@
 
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.0/dist/mindar-image-aframe.prod.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/aframe-gesture-component/dist/aframe-gesture-component.min.js"></script>
 
     <style>
         body { margin: 0; overflow: hidden; }
         #ar-scene { width: 100vw; height: 100vh; }
+
+        /* Full screen overlay to capture swipes */
+        #touch-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 20;
+            background: transparent;
+        }
     </style>
 </head>
 
 <body>
 
+<!-- MUST BE ABOVE SCRIPTS -->
+<div id="touch-overlay"></div>
+
 <script>
-    AFRAME.registerComponent('ar-carousel', {
-        init: function () {
-            this.total = 10;
-            this.index = 1;
-            this.isAnimating = false; // Prevents fast, repeated swipes
-            this.transitionDuration = 200; // Milliseconds for fade (adjust for speed)
-            this.carouselEl = this.el;
+/* ------------------- SWIPE DETECTION ------------------- */
+document.addEventListener("DOMContentLoaded", () => {
+    const overlay = document.getElementById("touch-overlay");
+    let startX = null;
+    const threshold = 60;
 
-            this.showSlide = this.showSlide.bind(this);
-            this.handleSwipe = this.handleSwipe.bind(this); // Combine swipe handlers
-            this.animateSlide = this.animateSlide.bind(this);
+    overlay.addEventListener("touchstart", (evt) => {
+        startX = evt.touches[0].clientX;
+    });
 
-            this.showSlide(this.index);
+    overlay.addEventListener("touchend", (evt) => {
+        if (startX === null) return;
+        const endX = evt.changedTouches[0].clientX;
+        const diff = endX - startX;
+        startX = null;
 
-            // Listen for the gesture events
-            this.carouselEl.addEventListener("swipeleft", () => this.handleSwipe('LEFT'));
-            this.carouselEl.addEventListener("swiperight", () => this.handleSwipe('RIGHT'));
-        },
+        let direction = null;
+        if (diff > threshold) direction = "RIGHT";
+        if (diff < -threshold) direction = "LEFT";
 
-        showSlide: function (i) {
-            for (let x = 1; x <= this.total; x++) {
-                const el = document.querySelector("#slide" + x);
-                if (el) {
-                    // Always ensure the previous slide is hidden correctly
-                    el.setAttribute("visible", x === i);
-                    // Set opacity to 1 for the current slide
-                    if (x === i) {
-                        el.setAttribute('material', 'opacity', 1);
-                    }
-                }
+        if (direction) {
+            overlay.dispatchEvent(
+                new CustomEvent("swipe", { detail: { direction } })
+            );
+        }
+    });
+});
+
+/* ------------------- AFRAME CAROUSEL ------------------- */
+AFRAME.registerComponent("ar-carousel", {
+    init: function () {
+        this.total = 10;
+        this.index = 1;
+        this.isAnimating = false;
+        this.speed = 200;
+
+        this.showSlide(this.index);
+
+        document
+            .getElementById("touch-overlay")
+            .addEventListener("swipe", (e) => this.handleSwipe(e));
+    },
+
+    showSlide(i) {
+        for (let n = 1; n <= this.total; n++) {
+            const el = document.querySelector("#slide" + n);
+            if (el) {
+                el.setAttribute("visible", n === i);
+                el.setAttribute("material", "opacity", n === i ? 1 : 0);
             }
-        },
-
-        handleSwipe: function (direction) {
-            if (this.isAnimating) return; // Ignore new swipe if already animating
-            this.isAnimating = true;
-
-            const nextIndex = direction === 'LEFT'
-                ? (this.index === this.total ? 1 : this.index + 1)
-                : (this.index === 1 ? this.total : this.index - 1);
-
-            this.animateSlide(this.index, nextIndex);
-        },
-        
-        // ⭐ NEW FUNCTION: Handles the fade out/in animation
-        animateSlide: function (currentIndex, nextIndex) {
-            const currentEl = document.querySelector("#slide" + currentIndex);
-            const nextEl = document.querySelector("#slide" + nextIndex);
-
-            // 1. Fade OUT the current slide
-            currentEl.setAttribute('animation__fadeout', {
-                property: 'material.opacity',
-                to: 0,
-                dur: this.transitionDuration,
-                easing: 'linear',
-            });
-            
-            // Wait for fade out to complete (using setTimeout for simplicity)
-            setTimeout(() => {
-                // 2. Hide the old slide and update the index
-                currentEl.setAttribute('visible', false);
-                this.index = nextIndex;
-
-                // 3. Prepare and Fade IN the next slide
-                nextEl.setAttribute('visible', true);
-                nextEl.setAttribute('material', 'opacity', 0); // Start transparent
-
-                nextEl.setAttribute('animation__fadein', {
-                    property: 'material.opacity',
-                    to: 1,
-                    dur: this.transitionDuration,
-                    easing: 'linear',
-                });
-
-                // Wait for fade in to complete
-                setTimeout(() => {
-                    this.isAnimating = false; // Ready for the next swipe
-                }, this.transitionDuration);
-
-            }, this.transitionDuration);
-        },
-
-        remove: function() {
-            this.carouselEl.removeEventListener("swipeleft", () => this.handleSwipe('LEFT'));
-            this.carouselEl.removeEventListener("swiperight", () => this.handleSwipe('RIGHT'));
         }
-    });
+    },
 
-    document.addEventListener('DOMContentLoaded', () => {
-        const target = document.querySelector("#target");
-        const carousel = document.querySelector("#carousel");
-        
-        if (target && carousel) {
-            target.addEventListener("targetFound", () => {
-                carousel.setAttribute("visible", true);
+    handleSwipe(evt) {
+        const dir = evt.detail.direction;
+        this.animateSlide(dir);
+    },
+
+    animateSlide(direction) {
+        if (this.isAnimating) return;
+        this.isAnimating = true;
+
+        let next =
+            direction === "LEFT"
+                ? this.index === this.total ? 1 : this.index + 1
+                : this.index === 1 ? this.total : this.index - 1;
+
+        const currentEl = document.querySelector("#slide" + this.index);
+        const nextEl = document.querySelector("#slide" + next);
+
+        /* Fade Out Current */
+        currentEl.setAttribute("animation__fadeout", {
+            property: "material.opacity",
+            to: 0,
+            dur: this.speed,
+            easing: "linear",
+        });
+
+        setTimeout(() => {
+            currentEl.setAttribute("visible", false);
+            this.index = next;
+
+            /* Fade In Next */
+            nextEl.setAttribute("visible", true);
+            nextEl.setAttribute("material", "opacity", 0);
+
+            nextEl.setAttribute("animation__fadein", {
+                property: "material.opacity",
+                to: 1,
+                dur: this.speed,
+                easing: "linear",
             });
-            target.addEventListener("targetLost", () => {
-                carousel.setAttribute("visible", false);
-            });
-        }
-    });
+
+            setTimeout(() => (this.isAnimating = false), this.speed);
+        }, this.speed);
+    },
+});
 </script>
 
-
-<a-scene id="ar-scene"
+<a-scene
+    id="ar-scene"
     mindar-image="imageTargetSrc: targets.mind; autoStart: true; uiScanning: yes;"
     color-space="sRGB"
     embedded
@@ -130,30 +138,26 @@
     device-orientation-permission-ui="enabled: false">
 
     <a-assets timeout="5000">
-        <img id="img1" src="img1.jpg" /><img id="img2" src="img2.jpg" /><img id="img3" src="img3.jpg" />
-        <img id="img4" src="img4.jpg" /><img id="img5" src="img5.jpg" /><img id="img6" src="img6.jpg" />
-        <img id="img7" src="img7.jpg" /><img id="img8" src="img8.jpg" /><img id="img9" src="img9.jpg" />
+        <img id="img1" src="img1.jpg" />
+        <img id="img2" src="img2.jpg" />
+        <img id="img3" src="img3.jpg" />
+        <img id="img4" src="img4.jpg" />
+        <img id="img5" src="img5.jpg" />
+        <img id="img6" src="img6.jpg" />
+        <img id="img7" src="img7.jpg" />
+        <img id="img8" src="img8.jpg" />
+        <img id="img9" src="img9.jpg" />
         <img id="img10" src="img10.jpg" />
     </a-assets>
 
     <a-camera look-controls="enabled: false"></a-camera>
 
     <a-entity id="target" mindar-image-target="targetIndex: 0">
-
         <a-entity id="carousel"
             position="0 0.3 0.1"
             rotation="-20 0 0"
             visible="false"
-            ar-carousel
-            gesture-detector> 
-
-            <a-plane 
-                width="2" 
-                height="2" 
-                position="0 0 0.01" 
-                material="opacity: 0; transparent: true;" 
-                rotation="0 0 0">
-            </a-plane>
+            ar-carousel>
 
             <a-plane width="1.05" height="1.45" color="#fff" position="0 0 0" material="shader: flat"></a-plane>
 
@@ -169,9 +173,7 @@
             <a-image id="slide10" src="#img10" width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
 
         </a-entity>
-
     </a-entity>
-
 </a-scene>
 
 </body>
