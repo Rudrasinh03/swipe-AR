@@ -1,193 +1,428 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AR Tinder-style Card Stack</title>
 
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.0/dist/mindar-image-aframe.prod.js"></script>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.0/dist/mindar-image-aframe.prod.js"></script>
 
-    <style>
-        body { margin: 0; overflow: hidden; }
-
-        #ar-scene { width: 100vw; height: 100vh; }
-
-        /* Full screen swipe catcher */
-        #touch-overlay {
-            position: fixed;
-            top: 0; left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 20;
-            background: transparent;
-        }
-    </style>
+  <style>
+    body { margin:0; overflow:hidden; font-family: sans-serif; }
+    #touch-overlay {
+      position: fixed; top:0; left:0;
+      width:100vw; height:100vh;
+      z-index:20; background:transparent;
+      touch-action: none; /* important for pointer/touch */
+    }
+  </style>
 </head>
-
 <body>
 
-<!-- MUST BE ABOVE SCRIPTS -->
+<!-- Fullscreen overlay for touch & mouse -->
 <div id="touch-overlay"></div>
 
 <script>
-/* ------------------- SWIPE DETECTOR ------------------- */
-document.addEventListener("DOMContentLoaded", () => {
-    const overlay = document.getElementById("touch-overlay");
-    let startX = null;
+/* ========= Config: update these image filenames as needed ========= */
+const IMAGE_LIST = [
+  'img1.jpg','img2.jpg','img3.jpg','img4.jpg','img5.jpg',
+  'img6.jpg','img7.jpg','img8.jpg','img9.jpg','img10.jpg'
+];
+/* ================================================================= */
+
+/* ---------- swipe & drag detector (touch + mouse) ---------- */
+class GestureDetector {
+  constructor(overlayEl, onSwipe, onDrag) {
+    this.overlay = overlayEl;
+    this.onSwipe = onSwipe; // (direction) => ...
+    this.onDrag = onDrag;   // (dx, isEnd, pointerType) => ...
+    this.reset();
+
+    // pointers
+    this.overlay.addEventListener('touchstart', (e)=>this.startTouch(e), {passive:false});
+    this.overlay.addEventListener('touchmove', (e)=>this.moveTouch(e), {passive:false});
+    this.overlay.addEventListener('touchend', (e)=>this.endTouch(e));
+    // mouse fallback
+    this.overlay.addEventListener('pointerdown', (e)=>this.startPointer(e));
+    this.overlay.addEventListener('pointermove', (e)=>this.movePointer(e));
+    this.overlay.addEventListener('pointerup', (e)=>this.endPointer(e));
+    this.overlay.addEventListener('pointercancel', (e)=>this.endPointer(e));
+  }
+
+  reset() {
+    this.active = false;
+    this.startX = 0;
+    this.lastX = 0;
+    this.startTime = 0;
+  }
+
+  startTouch(evt) {
+    if (evt.touches.length !== 1) return;
+    evt.preventDefault();
+    this.active = true;
+    this.startX = evt.touches[0].clientX;
+    this.lastX = this.startX;
+    this.startTime = Date.now();
+  }
+  moveTouch(evt) {
+    if (!this.active) return;
+    evt.preventDefault();
+    const x = evt.touches[0].clientX;
+    const dx = x - this.lastX;
+    this.lastX = x;
+    const total = x - this.startX;
+    if (this.onDrag) this.onDrag(total, false, 'touch');
+  }
+  endTouch(evt) {
+    if (!this.active) return;
+    const endX = (evt.changedTouches && evt.changedTouches[0]) ? evt.changedTouches[0].clientX : this.lastX;
+    const dx = endX - this.startX;
+    const dt = Date.now() - this.startTime;
+    this.active = false;
+    // quick swipe detection: distance & velocity
+    const threshold = 60; // px
+    const velocity = Math.abs(dx) / (dt + 1);
+    if (Math.abs(dx) > threshold || velocity > 0.5) {
+      const dir = dx > 0 ? 'RIGHT' : 'LEFT';
+      if (this.onSwipe) this.onSwipe(dir);
+    } else {
+      if (this.onDrag) this.onDrag(0, true, 'touch'); // release cancel
+    }
+  }
+
+  startPointer(e) {
+    // only react to primary button
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    this.active = true;
+    this.startX = e.clientX;
+    this.lastX = this.startX;
+    this.startTime = Date.now();
+    this.overlay.setPointerCapture && this.overlay.setPointerCapture(e.pointerId);
+  }
+  movePointer(e) {
+    if (!this.active) return;
+    const x = e.clientX;
+    const total = x - this.startX;
+    this.lastX = x;
+    if (this.onDrag) this.onDrag(total, false, e.pointerType || 'mouse');
+  }
+  endPointer(e) {
+    if (!this.active) return;
+    const endX = e.clientX;
+    const dx = endX - this.startX;
+    const dt = Date.now() - this.startTime;
+    this.active = false;
     const threshold = 60;
+    const velocity = Math.abs(dx) / (dt + 1);
+    if (Math.abs(dx) > threshold || velocity > 0.5) {
+      const dir = dx > 0 ? 'RIGHT' : 'LEFT';
+      if (this.onSwipe) this.onSwipe(dir);
+    } else {
+      if (this.onDrag) this.onDrag(0, true, e.pointerType || 'mouse'); // reset
+    }
+  }
+}
 
-    overlay.addEventListener("touchstart", (evt) => {
-        startX = evt.touches[0].clientX;
+/* ---------- A-Frame component: tinder-stack-ar ---------- */
+AFRAME.registerComponent('tinder-stack-ar', {
+  schema: {
+    visibleCount: {type: 'int', default: 2},
+    cardWidth: {type: 'number', default: 1.0},
+    cardHeight: {type: 'number', default: 1.3}
+  },
+
+  init: function() {
+    // internal state
+    this.images = IMAGE_LIST.slice(); // copy
+    if (this.images.length === 0) {
+      console.warn('No images specified in IMAGE_LIST.');
+    }
+    this.frontIndex = 0; // index in images array for the front card
+    this.backIndex = 1;  // index in images array for the back card
+    this.nextToLoad = 2; // next index to load into back when card is popped
+    this.isAnimating = false;
+
+    // references to A-Frame elements inside this entity (will create them)
+    this.frontCard = null;
+    this.backCard = null;
+    this.shadowFront = null;
+    this.shadowBack = null;
+
+    // create the stack nodes
+    this.createStack();
+
+    // gesture detector
+    const overlay = document.getElementById('touch-overlay');
+    this.gd = new GestureDetector(overlay,
+      (dir)=>this.onSwipe(dir),
+      (dx, isEnd, pointerType)=>this.onDrag(dx, isEnd)
+    );
+
+    // hide initially; scene-level logic will show on targetFound
+    this.el.setAttribute('visible', false);
+  },
+
+  createStack: function() {
+    const w = this.data.cardWidth;
+    const h = this.data.cardHeight;
+
+    // back card (slightly smaller and lower)
+    this.backCard = document.createElement('a-entity');
+    this.backCard.setAttribute('id','card-back');
+    this.backCard.setAttribute('position', `0 -0.03 0.03`); // slight offset backwards
+    this.backCard.setAttribute('rotation','-20 0 0');
+    this.el.appendChild(this.backCard);
+
+    // shadow for back
+    this.shadowBack = document.createElement('a-plane');
+    this.shadowBack.setAttribute('width', w*0.98);
+    this.shadowBack.setAttribute('height', h*0.2);
+    this.shadowBack.setAttribute('position','0 -0.72 0.001');
+    this.shadowBack.setAttribute('rotation','-90 0 0');
+    this.shadowBack.setAttribute('material','shader:flat; opacity:0.25; color:#0000ff'); // will adjust color via opacity
+    // use small scale to create soft look
+    this.backCard.appendChild(this.shadowBack);
+
+    // white background plane (acts as card background with slight round illusion)
+    const backBg = document.createElement('a-plane');
+    backBg.setAttribute('width', w);
+    backBg.setAttribute('height', h);
+    backBg.setAttribute('position', '0 0 0.002');
+    backBg.setAttribute('material','color: #ffffff; shader: flat;');
+    // rounded effect: inset the image with margin to look rounded
+    this.backCard.appendChild(backBg);
+
+    // image inside the back card (inset to simulate rounded corners)
+    this.backImage = document.createElement('a-image');
+    this.backImage.setAttribute('width', w*0.94);
+    this.backImage.setAttribute('height', h*0.94);
+    this.backImage.setAttribute('position','0 0 0.003');
+    this.backImage.setAttribute('visible','false'); // only visible when loaded
+    this.backCard.appendChild(this.backImage);
+
+    // front card (on top)
+    this.frontCard = document.createElement('a-entity');
+    this.frontCard.setAttribute('id','card-front');
+    this.frontCard.setAttribute('position','0 0 0.05');
+    this.frontCard.setAttribute('rotation','-20 0 0');
+    this.el.appendChild(this.frontCard);
+
+    this.shadowFront = document.createElement('a-plane');
+    this.shadowFront.setAttribute('width', w);
+    this.shadowFront.setAttribute('height', h*0.22);
+    this.shadowFront.setAttribute('position','0 -0.72 0.001');
+    this.shadowFront.setAttribute('rotation','-90 0 0');
+    this.shadowFront.setAttribute('material','shader:flat; opacity:0.4; color:#000');
+    this.frontCard.appendChild(this.shadowFront);
+
+    const frontBg = document.createElement('a-plane');
+    frontBg.setAttribute('width', w);
+    frontBg.setAttribute('height', h);
+    frontBg.setAttribute('position','0 0 0.002');
+    frontBg.setAttribute('material','color: #ffffff; shader: flat;');
+    this.frontCard.appendChild(frontBg);
+
+    this.frontImage = document.createElement('a-image');
+    this.frontImage.setAttribute('width', w*0.94);
+    this.frontImage.setAttribute('height', h*0.94);
+    this.frontImage.setAttribute('position','0 0 0.003');
+    this.frontImage.setAttribute('visible','false');
+    this.frontCard.appendChild(this.frontImage);
+
+    // load initial two images
+    this.loadIntoEntity(this.frontImage, this.frontIndex);
+    this.loadIntoEntity(this.backImage, this.backIndex);
+    // mark visible if existed
+    if (this.frontImage.getAttribute('src')) this.frontImage.setAttribute('visible','true');
+    if (this.backImage.getAttribute('src')) this.backImage.setAttribute('visible','true');
+  },
+
+  loadIntoEntity: function(imageEntity, imagesArrayIndex) {
+    // imagesArrayIndex refers to index in this.images
+    if (imagesArrayIndex >= this.images.length) {
+      // no image to load -> hide
+      imageEntity.removeAttribute('src');
+      imageEntity.setAttribute('visible','false');
+      return;
+    }
+    const path = this.images[imagesArrayIndex];
+    imageEntity.setAttribute('src', path);
+    imageEntity.setAttribute('visible','true');
+  },
+
+  onSwipe: function(direction) {
+    if (this.isAnimating) return;
+    this.popCard(direction);
+  },
+
+  onDrag: function(dx, isEnd) {
+    // dx: positive -> right drag, negative -> left drag
+    // During drag, move the front card accordingly for visual feedback
+    if (this.isAnimating) return;
+    const maxDrag = 200; // px mapping to scene units
+    const normalized = Math.max(-1, Math.min(1, dx / maxDrag));
+    const moveX = normalized * 0.7; // scene units to move
+    const rotZ = normalized * -10; // rotate a bit
+    if (!isEnd) {
+      this.frontCard.setAttribute('position', `${moveX} 0 0.05`);
+      this.frontCard.setAttribute('rotation', `-20 0 ${rotZ}`);
+    } else {
+      // return to center smoothly
+      this.frontCard.setAttribute('animation__returnpos', {
+        property: 'position',
+        to: '0 0 0.05',
+        dur: 180,
+        easing: 'easeOutQuad'
+      });
+      this.frontCard.setAttribute('animation__returnrot', {
+        property: 'rotation',
+        to: '-20 0 0',
+        dur: 180,
+        easing: 'easeOutQuad'
+      });
+    }
+  },
+
+  popCard: function(direction) {
+    if (this.isAnimating) return;
+    this.isAnimating = true;
+
+    const dirSign = direction === 'LEFT' ? -1 : 1;
+    // animate front card flying out
+    const toX = 1.8 * dirSign; // scene units
+    const toRot = dirSign * -35; // rotate while flying
+    const dur = 300;
+
+    // animate front: position and rotation and fade
+    this.frontCard.setAttribute('animation__flypos', {
+      property: 'position',
+      to: `${toX} 0 0.05`,
+      dur: dur,
+      easing: 'easeInQuad'
+    });
+    this.frontCard.setAttribute('animation__flyrot', {
+      property: 'rotation',
+      to: `-20 0 ${toRot}`,
+      dur: dur,
+      easing: 'easeInQuad'
+    });
+    this.frontImage.setAttribute('animation__fade', {
+      property: 'material.opacity',
+      to: 0,
+      dur: dur,
+      easing: 'linear'
     });
 
-    overlay.addEventListener("touchend", (evt) => {
-        if (startX === null) return;
-        const endX = evt.changedTouches[0].clientX;
-        const diff = endX - startX;
-        startX = null;
-
-        let direction = null;
-        if (diff > threshold) direction = "RIGHT";
-        if (diff < -threshold) direction = "LEFT";
-
-        if (direction) {
-            overlay.dispatchEvent(
-                new CustomEvent("swipe", { detail: { direction } })
-            );
-        }
+    // bring back card forward with a small lift/scale
+    this.backCard.setAttribute('animation__moveforward', {
+      property: 'position',
+      to: '0 0 0.05',
+      dur: dur,
+      easing: 'easeOutCubic'
     });
-});
+    this.backCard.setAttribute('animation__rotforward', {
+      property: 'rotation',
+      to: '-20 0 0',
+      dur: dur,
+      easing: 'easeOutCubic'
+    });
 
-/* ------------------- CAROUSEL ------------------- */
-AFRAME.registerComponent("ar-carousel", {
-    init: function () {
-        this.total = 10;
-        this.index = 1;
-        this.isAnimating = false;
-        this.speed = 200;
+    // after animation completes, reorder nodes: front becomes new back and vice versa
+    setTimeout(()=> {
+      // remove old front (we'll reuse entities but swap images)
+      // advance indices
+      this.frontIndex = this.nextToLoad - 1; // previous back becomes front
+      // shift indices
+      // compute nextToLoad index in circular manner
+      const loadedNow = this.nextToLoad;
+      this.nextToLoad = this.nextToLoad + 1;
+      // swap image element references: frontElement becomes back, back becomes front
+      // We'll simply swap the DOM pointers and image src values
+      const oldFrontImage = this.frontImage;
+      const oldFrontCard = this.frontCard;
+      // Move old front far away (reset)
+      oldFrontImage.removeAttribute('src');
+      oldFrontImage.setAttribute('visible','false');
+      oldFrontCard.setAttribute('position','0 -0.2 0.01');
+      oldFrontCard.setAttribute('rotation','-20 0 0');
 
-        this.showSlide(this.index);
+      // swap references: set front = back, back = oldFront
+      const tempFrontImage = this.frontImage;
+      const tempFrontCard = this.frontCard;
 
-        document
-            .getElementById("touch-overlay")
-            .addEventListener("swipe", (e) => this.handleSwipe(e));
-    },
+      this.frontImage = this.backImage;
+      this.frontCard = this.backCard;
+      this.shadowFront = this.shadowBack;
 
-    showSlide(i) {
-        for (let n = 1; n <= this.total; n++) {
-            const el = document.querySelector("#slide" + n);
-            if (el) {
-                el.setAttribute("visible", n === i);
-                el.setAttribute("material", "opacity", n === i ? 1 : 0);
-            }
-        }
-    },
+      this.backImage = oldFrontImage;
+      this.backCard = oldFrontCard;
+      this.shadowBack = this.shadowFront;
 
-    handleSwipe(evt) {
-        const dir = evt.detail.direction;
-        this.animateSlide(dir);
-    },
+      // now load the next image into backImage if exists
+      const nextIdx = loadedNow;
+      if (nextIdx < this.images.length) {
+        this.loadIntoEntity(this.backImage, nextIdx);
+      } else {
+        // hide back if no more images
+        this.backImage.removeAttribute('src');
+        this.backImage.setAttribute('visible','false');
+      }
+      // reset front card styles to center and reset opacity
+      this.frontCard.setAttribute('position','0 0 0.05');
+      this.frontCard.setAttribute('rotation','-20 0 0');
+      this.frontImage.setAttribute('material','opacity:1');
+      // ensure visible
+      this.frontImage.setAttribute('visible','true');
+      this.backImage.setAttribute('visible', this.backImage.getAttribute('src') ? 'true' : 'false');
 
-    animateSlide(direction) {
-        if (this.isAnimating) return;
-        this.isAnimating = true;
+      // update nextToLoad (clamp)
+      if (this.nextToLoad > this.images.length) this.nextToLoad = this.images.length;
 
-        let next =
-            direction === "LEFT"
-                ? this.index === 10 ? 1 : this.index + 1
-                : this.index === 1 ? 10 : this.index - 1;
-
-        const currentEl = document.querySelector("#slide" + this.index);
-        const nextEl = document.querySelector("#slide" + next);
-
-        currentEl.setAttribute("animation__fadeout", {
-            property: "material.opacity",
-            to: 0,
-            dur: this.speed,
-            easing: "linear",
-        });
-
-        setTimeout(() => {
-            currentEl.setAttribute("visible", false);
-            this.index = next;
-
-            nextEl.setAttribute("visible", true);
-            nextEl.setAttribute("material", "opacity", 0);
-
-            nextEl.setAttribute("animation__fadein", {
-                property: "material.opacity",
-                to: 1,
-                dur: this.speed,
-                easing: "linear",
-            });
-
-            setTimeout(() => (this.isAnimating = false), this.speed);
-        }, this.speed);
-    },
+      // allow new interactions
+      this.isAnimating = false;
+    }, dur + 20);
+  }
 });
 </script>
 
-<!-- ------------------- AR SCENE ------------------- -->
+<!-- ============ A-Frame scene ============ -->
 <a-scene
-    id="ar-scene"
-    mindar-image="imageTargetSrc: targets.mind; autoStart: true; uiScanning: yes;"
-    color-space="sRGB"
-    embedded
-    renderer="precision: high; antialias: true;"
-    vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: false">
+  mindar-image="imageTargetSrc: targets.mind; autoStart: true; uiScanning: yes;"
+  embedded
+  color-space="sRGB"
+  renderer="precision: high; antialias: true"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false">
 
-    <a-assets timeout="5000">
-        <img id="img1"  src="img1.jpg" />
-        <img id="img2"  src="img2.jpg" />
-        <img id="img3"  src="img3.jpg" />
-        <img id="img4"  src="img4.jpg" />
-        <img id="img5"  src="img5.jpg" />
-        <img id="img6"  src="img6.jpg" />
-        <img id="img7"  src="img7.jpg" />
-        <img id="img8"  src="img8.jpg" />
-        <img id="img9"  src="img9.jpg" />
-        <img id="img10" src="img10.jpg" />
-    </a-assets>
+  <!-- preload only first two images to keep memory low -->
+  <a-assets timeout="5000">
+    <img id="pre1" src="img1.jpg" />
+    <img id="pre2" src="img2.jpg" />
+  </a-assets>
 
-    <a-camera look-controls="enabled: false"></a-camera>
+  <a-camera look-controls="enabled:false"></a-camera>
 
-    <a-entity mindar-image-target="targetIndex: 0" id="target">
-
-        <!-- Show carousel only when target is visible -->
-        <a-entity id="carousel"
-            position="0 0.3 0.1"
-            rotation="-20 0 0"
-            visible="false"
-            ar-carousel>
-
-            <a-plane width="1.05" height="1.45" color="#fff" position="0 0 0" material="shader: flat"></a-plane>
-
-            <a-image id="slide1"  src="#img1"  width="1" height="1.3" position="0 0 0.02"></a-image>
-            <a-image id="slide2"  src="#img2"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide3"  src="#img3"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide4"  src="#img4"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide5"  src="#img5"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide6"  src="#img6"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide7"  src="#img7"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide8"  src="#img8"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide9"  src="#img9"  width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-            <a-image id="slide10" src="#img10" width="1" height="1.3" position="0 0 0.02" visible="false"></a-image>
-
-        </a-entity>
-
-    </a-entity>
+  <!-- AR target; the tinder stack entity is a child and will be shown when target found -->
+  <a-entity id="target" mindar-image-target="targetIndex: 0">
+    <a-entity id="tinderStack" position="0 0.15 0.1" rotation="0 0 0" tinder-stack-ar></a-entity>
+  </a-entity>
 
 </a-scene>
 
+<!-- show/hide logic for AR target -->
 <script>
-/* Show/hide carousel when marker found/lost */
-document.querySelector("#target").addEventListener("targetFound", () => {
-    document.querySelector("#carousel").setAttribute("visible", true);
-});
-
-document.querySelector("#target").addEventListener("targetLost", () => {
-    document.querySelector("#carousel").setAttribute("visible", false);
+document.addEventListener('DOMContentLoaded', () => {
+  const target = document.querySelector('#target');
+  const stack = document.querySelector('#tinderStack');
+  if (target && stack) {
+    target.addEventListener('targetFound', () => {
+      stack.setAttribute('visible','true');
+    });
+    target.addEventListener('targetLost', () => {
+      stack.setAttribute('visible','false');
+    });
+  }
 });
 </script>
 
