@@ -5,17 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.0/dist/mindar-image-aframe.prod.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/aframe-gesture-component/dist/aframe-gesture-component.min.js"></script>
 
     <style>
-        /* Ensures the AR camera view takes up the whole screen */
         body { margin: 0; overflow: hidden; }
-        #ar-scene {
-            width: 100vw;
-            height: 100vh;
-        }
+        #ar-scene { width: 100vw; height: 100vh; }
     </style>
 </head>
 
@@ -25,7 +20,7 @@
     AFRAME.registerComponent('ar-carousel', {
         init: function () {
             this.total = 10;
-            this.index = 1; // Start at slide 1
+            this.index = 1;
             this.carouselEl = this.el;
 
             this.showSlide = this.showSlide.bind(this);
@@ -34,6 +29,7 @@
             
             this.showSlide(this.index);
 
+            // Listen for the gesture events
             this.carouselEl.addEventListener("swipeleft", this.handleSwipeLeft);
             this.carouselEl.addEventListener("swiperight", this.handleSwipeRight);
         },
@@ -48,13 +44,11 @@
         },
 
         handleSwipeLeft: function () {
-            // Cycle forward (1 -> 2 -> ... -> 10 -> 1)
             this.index = this.index === this.total ? 1 : this.index + 1;
             this.showSlide(this.index);
         },
 
         handleSwipeRight: function () {
-            // Cycle backward (1 -> 10 -> 9 -> ... -> 1)
             this.index = this.index === 1 ? this.total : this.index - 1;
             this.showSlide(this.index);
         },
@@ -65,7 +59,6 @@
         }
     });
 
-    // Standalone listener for managing the AR content visibility
     document.addEventListener('DOMContentLoaded', () => {
         const target = document.querySelector("#target");
         const carousel = document.querySelector("#carousel");
@@ -114,6 +107,14 @@
             visible="false"
             ar-carousel
             gesture-detector> 
+
+            <a-plane 
+                width="2" 
+                height="2" 
+                position="0 0 0.01" 
+                material="opacity: 0; transparent: true;" 
+                rotation="0 0 0">
+            </a-plane>
 
             <a-plane width="1.05" height="1.45" color="#fff" position="0 0 0" material="shader: flat"></a-plane>
 
