@@ -3,426 +3,297 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>AR Tinder-style Card Stack</title>
+  <title>AR Tinder Stack</title>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.0/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    body { margin:0; overflow:hidden; font-family: sans-serif; }
+    body { margin:0; overflow:hidden; -webkit-user-select:none; user-select:none; }
+    /* Full-screen overlay to capture gestures */
     #touch-overlay {
       position: fixed; top:0; left:0;
       width:100vw; height:100vh;
       z-index:20; background:transparent;
-      touch-action: none; /* important for pointer/touch */
+      touch-action:none;
     }
   </style>
 </head>
 <body>
 
-<!-- Fullscreen overlay for touch & mouse -->
+<!-- overlay must be before scripts so listeners attach -->
 <div id="touch-overlay"></div>
 
 <script>
-/* ========= Config: update these image filenames as needed ========= */
-const IMAGE_LIST = [
+/* ------------- Configuration: set your image filenames here ------------- */
+const IMAGES = [
   'img1.jpg','img2.jpg','img3.jpg','img4.jpg','img5.jpg',
   'img6.jpg','img7.jpg','img8.jpg','img9.jpg','img10.jpg'
 ];
-/* ================================================================= */
+/* ---------------------------------------------------------------------- */
 
-/* ---------- swipe & drag detector (touch + mouse) ---------- */
+/* ---------- Gesture Detector: unified touch + mouse pointer ---------- */
 class GestureDetector {
-  constructor(overlayEl, onSwipe, onDrag) {
-    this.overlay = overlayEl;
-    this.onSwipe = onSwipe; // (direction) => ...
-    this.onDrag = onDrag;   // (dx, isEnd, pointerType) => ...
-    this.reset();
-
-    // pointers
-    this.overlay.addEventListener('touchstart', (e)=>this.startTouch(e), {passive:false});
-    this.overlay.addEventListener('touchmove', (e)=>this.moveTouch(e), {passive:false});
-    this.overlay.addEventListener('touchend', (e)=>this.endTouch(e));
-    // mouse fallback
-    this.overlay.addEventListener('pointerdown', (e)=>this.startPointer(e));
-    this.overlay.addEventListener('pointermove', (e)=>this.movePointer(e));
-    this.overlay.addEventListener('pointerup', (e)=>this.endPointer(e));
-    this.overlay.addEventListener('pointercancel', (e)=>this.endPointer(e));
-  }
-
-  reset() {
+  constructor(overlay, {onDrag, onRelease, onSwipe}) {
+    this.overlay = overlay;
+    this.onDrag = onDrag;
+    this.onRelease = onRelease;
+    this.onSwipe = onSwipe;
     this.active = false;
     this.startX = 0;
     this.lastX = 0;
     this.startTime = 0;
+    // touch
+    overlay.addEventListener('touchstart', (e)=>this.start(e.touches[0].clientX), {passive:false});
+    overlay.addEventListener('touchmove', (e)=>{ e.preventDefault(); this.move(e.touches[0].clientX); }, {passive:false});
+    overlay.addEventListener('touchend', (e)=>this.end((e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : this.lastX));
+    // pointer (mouse)
+    overlay.addEventListener('pointerdown', (e)=>{
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      this.overlay.setPointerCapture && this.overlay.setPointerCapture(e.pointerId);
+      this.start(e.clientX);
+    });
+    overlay.addEventListener('pointermove', (e)=>{ if(this.active) this.move(e.clientX); });
+    overlay.addEventListener('pointerup', (e)=>this.end(e.clientX));
+    overlay.addEventListener('pointercancel', (e)=>this.end(e.clientX));
   }
-
-  startTouch(evt) {
-    if (evt.touches.length !== 1) return;
-    evt.preventDefault();
+  start(x) {
     this.active = true;
-    this.startX = evt.touches[0].clientX;
-    this.lastX = this.startX;
+    this.startX = x;
+    this.lastX = x;
     this.startTime = Date.now();
   }
-  moveTouch(evt) {
+  move(x) {
     if (!this.active) return;
-    evt.preventDefault();
-    const x = evt.touches[0].clientX;
-    const dx = x - this.lastX;
-    this.lastX = x;
     const total = x - this.startX;
-    if (this.onDrag) this.onDrag(total, false, 'touch');
+    this.lastX = x;
+    if (this.onDrag) this.onDrag(total);
   }
-  endTouch(evt) {
+  end(x) {
     if (!this.active) return;
-    const endX = (evt.changedTouches && evt.changedTouches[0]) ? evt.changedTouches[0].clientX : this.lastX;
-    const dx = endX - this.startX;
+    const total = x - this.startX;
     const dt = Date.now() - this.startTime;
     this.active = false;
-    // quick swipe detection: distance & velocity
     const threshold = 60; // px
-    const velocity = Math.abs(dx) / (dt + 1);
-    if (Math.abs(dx) > threshold || velocity > 0.5) {
-      const dir = dx > 0 ? 'RIGHT' : 'LEFT';
+    const velocity = Math.abs(total) / (dt + 1);
+    if (Math.abs(total) > threshold || velocity > 0.5) {
+      const dir = total > 0 ? 'RIGHT' : 'LEFT';
       if (this.onSwipe) this.onSwipe(dir);
     } else {
-      if (this.onDrag) this.onDrag(0, true, 'touch'); // release cancel
-    }
-  }
-
-  startPointer(e) {
-    // only react to primary button
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    this.active = true;
-    this.startX = e.clientX;
-    this.lastX = this.startX;
-    this.startTime = Date.now();
-    this.overlay.setPointerCapture && this.overlay.setPointerCapture(e.pointerId);
-  }
-  movePointer(e) {
-    if (!this.active) return;
-    const x = e.clientX;
-    const total = x - this.startX;
-    this.lastX = x;
-    if (this.onDrag) this.onDrag(total, false, e.pointerType || 'mouse');
-  }
-  endPointer(e) {
-    if (!this.active) return;
-    const endX = e.clientX;
-    const dx = endX - this.startX;
-    const dt = Date.now() - this.startTime;
-    this.active = false;
-    const threshold = 60;
-    const velocity = Math.abs(dx) / (dt + 1);
-    if (Math.abs(dx) > threshold || velocity > 0.5) {
-      const dir = dx > 0 ? 'RIGHT' : 'LEFT';
-      if (this.onSwipe) this.onSwipe(dir);
-    } else {
-      if (this.onDrag) this.onDrag(0, true, e.pointerType || 'mouse'); // reset
+      if (this.onRelease) this.onRelease(); // snap back
     }
   }
 }
 
-/* ---------- A-Frame component: tinder-stack-ar ---------- */
-AFRAME.registerComponent('tinder-stack-ar', {
-  schema: {
-    visibleCount: {type: 'int', default: 2},
-    cardWidth: {type: 'number', default: 1.0},
-    cardHeight: {type: 'number', default: 1.3}
-  },
+/* ---------- A-Frame component: stack-swiper ---------- */
+AFRAME.registerComponent('stack-swiper', {
+  schema: { cardW: {type:'number', default:1.0}, cardH: {type:'number', default:1.3} },
 
   init: function() {
-    // internal state
-    this.images = IMAGE_LIST.slice(); // copy
-    if (this.images.length === 0) {
-      console.warn('No images specified in IMAGE_LIST.');
-    }
-    this.frontIndex = 0; // index in images array for the front card
-    this.backIndex = 1;  // index in images array for the back card
-    this.nextToLoad = 2; // next index to load into back when card is popped
+    this.images = IMAGES.slice(); // copy
+    this.total = this.images.length;
+    this.ptr = 0; // index of current front in images array
+    this.nextPtr = 1; // index for back card
     this.isAnimating = false;
 
-    // references to A-Frame elements inside this entity (will create them)
-    this.frontCard = null;
-    this.backCard = null;
-    this.shadowFront = null;
-    this.shadowBack = null;
+    // create card nodes (white background + image inset + shadow)
+    this.createCards();
 
-    // create the stack nodes
-    this.createStack();
-
-    // gesture detector
+    // attach gesture detector
     const overlay = document.getElementById('touch-overlay');
-    this.gd = new GestureDetector(overlay,
-      (dir)=>this.onSwipe(dir),
-      (dx, isEnd, pointerType)=>this.onDrag(dx, isEnd)
-    );
+    this.gd = new GestureDetector(overlay, {
+      onDrag: (dx)=> this.onDrag(dx),
+      onRelease: ()=> this.resetFrontPosition(),
+      onSwipe: (dir)=> this.popFront(dir)
+    });
 
-    // hide initially; scene-level logic will show on targetFound
+    // hide until marker found
     this.el.setAttribute('visible', false);
   },
 
-  createStack: function() {
-    const w = this.data.cardWidth;
-    const h = this.data.cardHeight;
+  createCards: function() {
+    const w = this.data.cardW, h = this.data.cardH;
 
-    // back card (slightly smaller and lower)
-    this.backCard = document.createElement('a-entity');
-    this.backCard.setAttribute('id','card-back');
-    this.backCard.setAttribute('position', `0 -0.03 0.03`); // slight offset backwards
-    this.backCard.setAttribute('rotation','-20 0 0');
-    this.el.appendChild(this.backCard);
+    // BACK CARD
+    this.back = document.createElement('a-entity');
+    this.back.setAttribute('id','card-back');
+    this.back.setAttribute('position','0 -0.02 0.03');
+    this.back.setAttribute('rotation','-20 0 0');
+    this.el.appendChild(this.back);
 
-    // shadow for back
-    this.shadowBack = document.createElement('a-plane');
-    this.shadowBack.setAttribute('width', w*0.98);
-    this.shadowBack.setAttribute('height', h*0.2);
-    this.shadowBack.setAttribute('position','0 -0.72 0.001');
-    this.shadowBack.setAttribute('rotation','-90 0 0');
-    this.shadowBack.setAttribute('material','shader:flat; opacity:0.25; color:#0000ff'); // will adjust color via opacity
-    // use small scale to create soft look
-    this.backCard.appendChild(this.shadowBack);
+    const backShadow = document.createElement('a-plane');
+    backShadow.setAttribute('width', w*0.92);
+    backShadow.setAttribute('height', h*0.22);
+    backShadow.setAttribute('position','0 -0.73 0.001');
+    backShadow.setAttribute('rotation','-90 0 0');
+    backShadow.setAttribute('material','shader:flat; color:#000; opacity:0.22');
+    this.back.appendChild(backShadow);
 
-    // white background plane (acts as card background with slight round illusion)
     const backBg = document.createElement('a-plane');
     backBg.setAttribute('width', w);
     backBg.setAttribute('height', h);
-    backBg.setAttribute('position', '0 0 0.002');
-    backBg.setAttribute('material','color: #ffffff; shader: flat;');
-    // rounded effect: inset the image with margin to look rounded
-    this.backCard.appendChild(backBg);
+    backBg.setAttribute('position','0 0 0.002');
+    backBg.setAttribute('material','shader:flat; color: #ffffff');
+    this.back.appendChild(backBg);
 
-    // image inside the back card (inset to simulate rounded corners)
-    this.backImage = document.createElement('a-image');
-    this.backImage.setAttribute('width', w*0.94);
-    this.backImage.setAttribute('height', h*0.94);
-    this.backImage.setAttribute('position','0 0 0.003');
-    this.backImage.setAttribute('visible','false'); // only visible when loaded
-    this.backCard.appendChild(this.backImage);
+    this.backImg = document.createElement('a-image');
+    this.backImg.setAttribute('width', w*0.94);
+    this.backImg.setAttribute('height', h*0.94);
+    this.backImg.setAttribute('position','0 0 0.003');
+    this.backImg.setAttribute('visible','false');
+    this.back.appendChild(this.backImg);
 
-    // front card (on top)
-    this.frontCard = document.createElement('a-entity');
-    this.frontCard.setAttribute('id','card-front');
-    this.frontCard.setAttribute('position','0 0 0.05');
-    this.frontCard.setAttribute('rotation','-20 0 0');
-    this.el.appendChild(this.frontCard);
+    // FRONT CARD
+    this.front = document.createElement('a-entity');
+    this.front.setAttribute('id','card-front');
+    this.front.setAttribute('position','0 0 0.06');
+    this.front.setAttribute('rotation','-20 0 0');
+    this.el.appendChild(this.front);
 
-    this.shadowFront = document.createElement('a-plane');
-    this.shadowFront.setAttribute('width', w);
-    this.shadowFront.setAttribute('height', h*0.22);
-    this.shadowFront.setAttribute('position','0 -0.72 0.001');
-    this.shadowFront.setAttribute('rotation','-90 0 0');
-    this.shadowFront.setAttribute('material','shader:flat; opacity:0.4; color:#000');
-    this.frontCard.appendChild(this.shadowFront);
+    const frontShadow = document.createElement('a-plane');
+    frontShadow.setAttribute('width', w);
+    frontShadow.setAttribute('height', h*0.24);
+    frontShadow.setAttribute('position','0 -0.75 0.001');
+    frontShadow.setAttribute('rotation','-90 0 0');
+    frontShadow.setAttribute('material','shader:flat; color:#000; opacity:0.36');
+    this.front.appendChild(frontShadow);
 
     const frontBg = document.createElement('a-plane');
     frontBg.setAttribute('width', w);
     frontBg.setAttribute('height', h);
     frontBg.setAttribute('position','0 0 0.002');
-    frontBg.setAttribute('material','color: #ffffff; shader: flat;');
-    this.frontCard.appendChild(frontBg);
+    frontBg.setAttribute('material','shader:flat; color: #ffffff');
+    this.front.appendChild(frontBg);
 
-    this.frontImage = document.createElement('a-image');
-    this.frontImage.setAttribute('width', w*0.94);
-    this.frontImage.setAttribute('height', h*0.94);
-    this.frontImage.setAttribute('position','0 0 0.003');
-    this.frontImage.setAttribute('visible','false');
-    this.frontCard.appendChild(this.frontImage);
+    this.frontImg = document.createElement('a-image');
+    this.frontImg.setAttribute('width', w*0.94);
+    this.frontImg.setAttribute('height', h*0.94);
+    this.frontImg.setAttribute('position','0 0 0.003');
+    this.frontImg.setAttribute('visible','false');
+    this.front.appendChild(this.frontImg);
 
-    // load initial two images
-    this.loadIntoEntity(this.frontImage, this.frontIndex);
-    this.loadIntoEntity(this.backImage, this.backIndex);
-    // mark visible if existed
-    if (this.frontImage.getAttribute('src')) this.frontImage.setAttribute('visible','true');
-    if (this.backImage.getAttribute('src')) this.backImage.setAttribute('visible','true');
+    // load initial images
+    if (this.total > 0) this.loadInto(this.frontImg, this.ptr);
+    if (this.total > 1) this.loadInto(this.backImg, this.nextPtr);
   },
 
-  loadIntoEntity: function(imageEntity, imagesArrayIndex) {
-    // imagesArrayIndex refers to index in this.images
-    if (imagesArrayIndex >= this.images.length) {
-      // no image to load -> hide
+  loadInto: function(imageEntity, index) {
+    if (index >= 0 && index < this.images.length) {
+      imageEntity.setAttribute('src', this.images[index]);
+      imageEntity.setAttribute('visible','true');
+    } else {
       imageEntity.removeAttribute('src');
       imageEntity.setAttribute('visible','false');
-      return;
-    }
-    const path = this.images[imagesArrayIndex];
-    imageEntity.setAttribute('src', path);
-    imageEntity.setAttribute('visible','true');
-  },
-
-  onSwipe: function(direction) {
-    if (this.isAnimating) return;
-    this.popCard(direction);
-  },
-
-  onDrag: function(dx, isEnd) {
-    // dx: positive -> right drag, negative -> left drag
-    // During drag, move the front card accordingly for visual feedback
-    if (this.isAnimating) return;
-    const maxDrag = 200; // px mapping to scene units
-    const normalized = Math.max(-1, Math.min(1, dx / maxDrag));
-    const moveX = normalized * 0.7; // scene units to move
-    const rotZ = normalized * -10; // rotate a bit
-    if (!isEnd) {
-      this.frontCard.setAttribute('position', `${moveX} 0 0.05`);
-      this.frontCard.setAttribute('rotation', `-20 0 ${rotZ}`);
-    } else {
-      // return to center smoothly
-      this.frontCard.setAttribute('animation__returnpos', {
-        property: 'position',
-        to: '0 0 0.05',
-        dur: 180,
-        easing: 'easeOutQuad'
-      });
-      this.frontCard.setAttribute('animation__returnrot', {
-        property: 'rotation',
-        to: '-20 0 0',
-        dur: 180,
-        easing: 'easeOutQuad'
-      });
     }
   },
 
-  popCard: function(direction) {
+  onDrag: function(dx) {
+    if (this.isAnimating) return;
+    // map dx (px) to scene units roughly
+    const maxPx = 200;
+    const normalized = Math.max(-1, Math.min(1, dx / maxPx));
+    const moveX = normalized * 0.6; // units
+    const rotZ = normalized * -12;
+    this.front.setAttribute('position', `${moveX} 0 0.06`);
+    this.front.setAttribute('rotation', `-20 0 ${rotZ}`);
+  },
+
+  resetFrontPosition: function() {
+    if (this.isAnimating) return;
+    // simple snap-back animations
+    this.front.setAttribute('animation__snappos', { property: 'position', to: '0 0 0.06', dur: 180, easing: 'easeOutQuad' });
+    this.front.setAttribute('animation__snaprot', { property: 'rotation', to: '-20 0 0', dur: 180, easing: 'easeOutQuad' });
+  },
+
+  popFront: function(direction) {
     if (this.isAnimating) return;
     this.isAnimating = true;
+    const sign = direction === 'LEFT' ? -1 : 1;
+    const flyX = 1.8 * sign;
+    const rotZ = sign * -40;
+    const dur = 320;
 
-    const dirSign = direction === 'LEFT' ? -1 : 1;
-    // animate front card flying out
-    const toX = 1.8 * dirSign; // scene units
-    const toRot = dirSign * -35; // rotate while flying
-    const dur = 300;
+    // fly out front card
+    this.front.setAttribute('animation__flypos', { property:'position', to: `${flyX} 0 0.06`, dur: dur, easing:'easeInQuad' });
+    this.front.setAttribute('animation__flyrot', { property:'rotation', to:`-20 0 ${rotZ}`, dur: dur, easing:'easeInQuad' });
+    this.frontImg.setAttribute('animation__fade', { property:'material.opacity', to:0, dur:dur, easing:'linear' });
 
-    // animate front: position and rotation and fade
-    this.frontCard.setAttribute('animation__flypos', {
-      property: 'position',
-      to: `${toX} 0 0.05`,
-      dur: dur,
-      easing: 'easeInQuad'
-    });
-    this.frontCard.setAttribute('animation__flyrot', {
-      property: 'rotation',
-      to: `-20 0 ${toRot}`,
-      dur: dur,
-      easing: 'easeInQuad'
-    });
-    this.frontImage.setAttribute('animation__fade', {
-      property: 'material.opacity',
-      to: 0,
-      dur: dur,
-      easing: 'linear'
-    });
+    // bring back forward
+    this.back.setAttribute('animation__forward', { property:'position', to: '0 0 0.06', dur: dur, easing:'easeOutCubic' });
+    this.back.setAttribute('animation__rotforward', { property:'rotation', to: '-20 0 0', dur: dur, easing:'easeOutCubic' });
 
-    // bring back card forward with a small lift/scale
-    this.backCard.setAttribute('animation__moveforward', {
-      property: 'position',
-      to: '0 0 0.05',
-      dur: dur,
-      easing: 'easeOutCubic'
-    });
-    this.backCard.setAttribute('animation__rotforward', {
-      property: 'rotation',
-      to: '-20 0 0',
-      dur: dur,
-      easing: 'easeOutCubic'
-    });
-
-    // after animation completes, reorder nodes: front becomes new back and vice versa
+    // after animation finishes, rotate references and load next image into back
     setTimeout(()=> {
-      // remove old front (we'll reuse entities but swap images)
-      // advance indices
-      this.frontIndex = this.nextToLoad - 1; // previous back becomes front
-      // shift indices
-      // compute nextToLoad index in circular manner
-      const loadedNow = this.nextToLoad;
-      this.nextToLoad = this.nextToLoad + 1;
-      // swap image element references: frontElement becomes back, back becomes front
-      // We'll simply swap the DOM pointers and image src values
-      const oldFrontImage = this.frontImage;
-      const oldFrontCard = this.frontCard;
-      // Move old front far away (reset)
-      oldFrontImage.removeAttribute('src');
-      oldFrontImage.setAttribute('visible','false');
-      oldFrontCard.setAttribute('position','0 -0.2 0.01');
-      oldFrontCard.setAttribute('rotation','-20 0 0');
+      // remove old front image src and reset its opacity
+      this.frontImg.removeAttribute('src');
+      this.frontImg.setAttribute('material','opacity:1');
+      this.frontImg.setAttribute('visible','false');
 
-      // swap references: set front = back, back = oldFront
-      const tempFrontImage = this.frontImage;
-      const tempFrontCard = this.frontCard;
+      // swap DOM-level references (front becomes back and vice versa)
+      const oldFront = this.front; const oldFrontImg = this.frontImg;
+      const oldBack = this.back; const oldBackImg = this.backImg;
 
-      this.frontImage = this.backImage;
-      this.frontCard = this.backCard;
-      this.shadowFront = this.shadowBack;
+      // swap variables
+      this.front = oldBack;
+      this.frontImg = oldBackImg;
+      this.back = oldFront;
+      this.backImg = oldFrontImg;
 
-      this.backImage = oldFrontImage;
-      this.backCard = oldFrontCard;
-      this.shadowBack = this.shadowFront;
+      // reset positions & rotations
+      this.front.setAttribute('position','0 0 0.06');
+      this.front.setAttribute('rotation','-20 0 0');
+      this.back.setAttribute('position','0 -0.02 0.03');
+      this.back.setAttribute('rotation','-20 0 0');
+      this.backImg.setAttribute('material','opacity:1');
 
-      // now load the next image into backImage if exists
-      const nextIdx = loadedNow;
-      if (nextIdx < this.images.length) {
-        this.loadIntoEntity(this.backImage, nextIdx);
-      } else {
-        // hide back if no more images
-        this.backImage.removeAttribute('src');
-        this.backImage.setAttribute('visible','false');
-      }
-      // reset front card styles to center and reset opacity
-      this.frontCard.setAttribute('position','0 0 0.05');
-      this.frontCard.setAttribute('rotation','-20 0 0');
-      this.frontImage.setAttribute('material','opacity:1');
-      // ensure visible
-      this.frontImage.setAttribute('visible','true');
-      this.backImage.setAttribute('visible', this.backImage.getAttribute('src') ? 'true' : 'false');
+      // advance pointers circularly
+      this.ptr = (this.ptr + 1) % this.total;
+      this.nextPtr = (this.ptr + 1) % this.total;
 
-      // update nextToLoad (clamp)
-      if (this.nextToLoad > this.images.length) this.nextToLoad = this.images.length;
+      // load next image into backImg (which is now the offscreen card)
+      // Determine index to load: (ptr + 1)
+      const loadIndex = (this.ptr + 1) % this.total;
+      // If there's only one image, handle that gracefully
+      if (this.total > 1) this.loadInto(this.backImg, loadIndex);
+      else this.backImg.setAttribute('visible','false');
 
-      // allow new interactions
       this.isAnimating = false;
-    }, dur + 20);
+    }, dur + 30);
   }
 });
 </script>
 
-<!-- ============ A-Frame scene ============ -->
+<!-- =========== AR Scene =========== -->
 <a-scene
   mindar-image="imageTargetSrc: targets.mind; autoStart: true; uiScanning: yes;"
   embedded
   color-space="sRGB"
-  renderer="precision: high; antialias: true"
+  renderer="precision: high; antialias: true;"
   vr-mode-ui="enabled: false"
   device-orientation-permission-ui="enabled: false">
 
-  <!-- preload only first two images to keep memory low -->
+  <!-- Preload the first two images (speeds initial display) -->
   <a-assets timeout="5000">
-    <img id="pre1" src="img1.jpg" />
-    <img id="pre2" src="img2.jpg" />
+    <img id="a1" src="img1.jpg" />
+    <img id="a2" src="img2.jpg" />
+    <!-- add more assets here if you prefer -->
   </a-assets>
 
   <a-camera look-controls="enabled:false"></a-camera>
 
-  <!-- AR target; the tinder stack entity is a child and will be shown when target found -->
   <a-entity id="target" mindar-image-target="targetIndex: 0">
-    <a-entity id="tinderStack" position="0 0.15 0.1" rotation="0 0 0" tinder-stack-ar></a-entity>
+    <a-entity id="stack" position="0 0.15 0.12" rotation="0 0 0" stack-swiper></a-entity>
   </a-entity>
-
 </a-scene>
 
-<!-- show/hide logic for AR target -->
+<!-- show/hide when target found/lost -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const target = document.querySelector('#target');
-  const stack = document.querySelector('#tinderStack');
-  if (target && stack) {
-    target.addEventListener('targetFound', () => {
-      stack.setAttribute('visible','true');
-    });
-    target.addEventListener('targetLost', () => {
-      stack.setAttribute('visible','false');
-    });
-  }
+  const stack = document.querySelector('#stack');
+  if (!target || !stack) return;
+  target.addEventListener('targetFound', ()=> stack.setAttribute('visible','true'));
+  target.addEventListener('targetLost', ()=> stack.setAttribute('visible','false'));
 });
 </script>
 
