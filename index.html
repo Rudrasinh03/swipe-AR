@@ -15,29 +15,18 @@
       width: 100%;
       height: 100%;
       position: fixed;
-      overflow: hidden !important;          /* ⛔ Prevent browser swipe */
-      overscroll-behavior: none !important; /* ⛔ Prevent rubber bounce */
-      touch-action: none !important;        /* ⛔ Prevent touch scrolling */
+      overflow: hidden !important;
+      overscroll-behavior: none !important;
+      touch-action: none !important;
       background: #000;
-      -webkit-user-select: none;
       user-select: none;
     }
 
-    a-scene {
-      position: fixed !important;
-      top: 0; left: 0;
-      width: 100vw !important;
-      height: 100vh !important;
-      overflow: hidden !important;
-      z-index: 0;
-    }
-
-    /* Top transparent gesture overlay */
     #touch-overlay {
       position: fixed;
       top:0; left:0;
       width:100vw; height:100vh;
-      z-index:9999;                  /* 🟢 Always above everything */
+      z-index:9999;
       background:transparent;
       touch-action:none;
     }
@@ -45,25 +34,35 @@
 </head>
 <body>
 
-<!-- 🔥 Fullscreen gesture capture -->
+<!-- Gesture Layer -->
 <div id="touch-overlay"></div>
 
 <script>
-/* ------------------ IMAGE LIST ------------------ */
+/* -------------------------
+   IMAGES + PRODUCT LINKS
+----------------------------*/
 const IMAGES = [
   'img1.jpg','img2.jpg','img3.jpg','img4.jpg','img5.jpg',
   'img6.jpg','img7.jpg','img8.jpg','img9.jpg','img10.jpg'
 ];
 
-/* ------------------ PRELOAD FOR SPEED ------------------ */
-IMAGES.forEach(src => {
-  const img = new Image();
-  img.src = src;
-});
+const LINKS = [
+  'https://example.com/p1',
+  'https://example.com/p2',
+  'https://example.com/p3',
+  'https://example.com/p4',
+  'https://example.com/p5',
+  'https://example.com/p6',
+  'https://example.com/p7',
+  'https://example.com/p8',
+  'https://example.com/p9',
+  'https://example.com/p10'
+];
 
-/* ========================================================
-   GESTURE DETECTOR (No Page Movement / No Browser Swipe)
-   ======================================================== */
+/* Preload images */
+IMAGES.forEach(src => { const i = new Image(); i.src = src; });
+
+/* Gesture Detector (same as your code) */
 class GestureDetector {
   constructor(overlay, {onDrag, onRelease, onSwipe}) {
     this.onDrag = onDrag;
@@ -79,19 +78,8 @@ class GestureDetector {
     overlay.addEventListener("pointerup", e => this.end(e.clientX));
   }
 
-  start(x) {
-    this.startX = x;
-    this.lastX = x;
-    this.startT = Date.now();
-    this.active = true;
-  }
-
-  move(x) {
-    if (!this.active) return;
-    this.lastX = x;
-    if (this.onDrag) this.onDrag(x - this.startX);
-  }
-
+  start(x) { this.startX = x; this.lastX = x; this.startT = Date.now(); this.active = true; }
+  move(x) { if (!this.active) return; this.lastX = x; this.onDrag(x - this.startX); }
   end(x) {
     if (!this.active) return;
     this.active = false;
@@ -108,9 +96,9 @@ class GestureDetector {
   }
 }
 
-/* ========================================================
-   CARD SWIPER COMPONENT
-   ======================================================== */
+/* -------------------------
+   SWIPE STACK COMPONENT
+----------------------------*/
 AFRAME.registerComponent("stack-swiper", {
   init: function() {
     this.ptr = 0;
@@ -130,6 +118,12 @@ AFRAME.registerComponent("stack-swiper", {
     );
 
     this.el.setAttribute("visible", false);
+
+    /* CLICK LISTENER ADDED HERE 🔥 */
+    this.front.addEventListener("click", () => {
+      const link = LINKS[this.ptr];
+      window.open(link, "_blank");
+    });
   },
 
   makeCards() {
@@ -137,6 +131,7 @@ AFRAME.registerComponent("stack-swiper", {
     this.front.setAttribute("width", "1");
     this.front.setAttribute("height", "1.3");
     this.front.setAttribute("position", "0 0 0.05");
+    this.front.setAttribute("class", "clickable");
     this.el.appendChild(this.front);
 
     this.back = document.createElement("a-image");
@@ -215,16 +210,13 @@ AFRAME.registerComponent("stack-swiper", {
 </script>
 
 
-<!-- ========================================================
-     AR SCENE
-======================================================== -->
+<!-- AR Scene -->
 <a-scene
   mindar-image="imageTargetSrc: targets.mind; autoStart: true; uiScanning: yes;"
   embedded
-  color-space="sRGB"
-  renderer="precision: high; antialias: true"
-  vr-mode-ui="enabled: false"
-  device-orientation-permission-ui="enabled: false">
+  cursor="rayOrigin: mouse"
+  raycaster="objects: .clickable"
+  vr-mode-ui="enabled: false">
 
   <a-camera look-controls="enabled:false"></a-camera>
 
