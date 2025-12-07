@@ -16,9 +16,10 @@
       height: 100%;
       position: fixed;
       overflow: hidden !important;
+      background: #000;
       overscroll-behavior: none !important;
       touch-action: none !important;
-      background: #000;
+      -webkit-user-select: none;
       user-select: none;
     }
 
@@ -34,52 +35,66 @@
 </head>
 <body>
 
-<!-- Gesture Layer -->
 <div id="touch-overlay"></div>
 
 <script>
-/* -------------------------
-   IMAGES + PRODUCT LINKS
-----------------------------*/
+/* ------------------ IMAGE LIST ------------------ */
 const IMAGES = [
   'img1.jpg','img2.jpg','img3.jpg','img4.jpg','img5.jpg',
   'img6.jpg','img7.jpg','img8.jpg','img9.jpg','img10.jpg'
 ];
 
+/* ------------------ PRODUCT LINKS ------------------ */
 const LINKS = [
-  'https://example.com/p1',
-  'https://example.com/p2',
-  'https://example.com/p3',
-  'https://example.com/p4',
-  'https://example.com/p5',
-  'https://example.com/p6',
-  'https://example.com/p7',
-  'https://example.com/p8',
-  'https://example.com/p9',
-  'https://example.com/p10'
+  "https://example.com/p1",
+  "https://example.com/p2",
+  "https://example.com/p3",
+  "https://example.com/p4",
+  "https://example.com/p5",
+  "https://example.com/p6",
+  "https://example.com/p7",
+  "https://example.com/p8",
+  "https://example.com/p9",
+  "https://example.com/p10"
 ];
 
-/* Preload images */
+/* PRELOAD IMAGES */
 IMAGES.forEach(src => { const i = new Image(); i.src = src; });
 
-/* Gesture Detector (same as your code) */
+/* ========================================================
+   GESTURE DETECTOR (Swipe + Tap)
+   ======================================================== */
 class GestureDetector {
-  constructor(overlay, {onDrag, onRelease, onSwipe}) {
+  constructor(overlay, {onDrag, onRelease, onSwipe, onTap}) {
     this.onDrag = onDrag;
     this.onRelease = onRelease;
     this.onSwipe = onSwipe;
+    this.onTap = onTap;
 
+    // TOUCH
     overlay.addEventListener("touchstart", e => this.start(e.touches[0].clientX), { passive:false });
     overlay.addEventListener("touchmove", e => { e.preventDefault(); this.move(e.touches[0].clientX) }, { passive:false });
     overlay.addEventListener("touchend", e => this.end(e.changedTouches[0].clientX));
 
+    // MOUSE / POINTER
     overlay.addEventListener("pointerdown", e => this.start(e.clientX));
     overlay.addEventListener("pointermove", e => this.move(e.clientX));
     overlay.addEventListener("pointerup", e => this.end(e.clientX));
   }
 
-  start(x) { this.startX = x; this.lastX = x; this.startT = Date.now(); this.active = true; }
-  move(x) { if (!this.active) return; this.lastX = x; this.onDrag(x - this.startX); }
+  start(x) {
+    this.startX = x;
+    this.lastX = x;
+    this.startT = Date.now();
+    this.active = true;
+  }
+
+  move(x) {
+    if (!this.active) return;
+    this.lastX = x;
+    if (this.onDrag) this.onDrag(x - this.startX);
+  }
+
   end(x) {
     if (!this.active) return;
     this.active = false;
@@ -88,6 +103,13 @@ class GestureDetector {
     const t = Date.now() - this.startT;
     const fast = Math.abs(dist) / (t + 1);
 
+    /* -------- TAP DETECTION -------- */
+    if (Math.abs(dist) < 10 && t < 250) {
+      if (this.onTap) this.onTap();
+      return;
+    }
+
+    /* -------- SWIPE DETECTION -------- */
     if (Math.abs(dist) > 60 || fast > 0.4) {
       this.onSwipe(dist > 0 ? "RIGHT" : "LEFT");
     } else {
@@ -96,9 +118,9 @@ class GestureDetector {
   }
 }
 
-/* -------------------------
-   SWIPE STACK COMPONENT
-----------------------------*/
+/* ========================================================
+   SWIPER COMPONENT
+   ======================================================== */
 AFRAME.registerComponent("stack-swiper", {
   init: function() {
     this.ptr = 0;
@@ -113,17 +135,14 @@ AFRAME.registerComponent("stack-swiper", {
       {
         onDrag: dx => this.drag(dx),
         onRelease: () => this.reset(),
-        onSwipe: dir => this.pop(dir)
+        onSwipe: dir => this.pop(dir),
+
+        // NEW: Tap event
+        onTap: () => this.openLink()
       }
     );
 
     this.el.setAttribute("visible", false);
-
-    /* CLICK LISTENER ADDED HERE 🔥 */
-    this.front.addEventListener("click", () => {
-      const link = LINKS[this.ptr];
-      window.open(link, "_blank");
-    });
   },
 
   makeCards() {
@@ -131,7 +150,6 @@ AFRAME.registerComponent("stack-swiper", {
     this.front.setAttribute("width", "1");
     this.front.setAttribute("height", "1.3");
     this.front.setAttribute("position", "0 0 0.05");
-    this.front.setAttribute("class", "clickable");
     this.el.appendChild(this.front);
 
     this.back = document.createElement("a-image");
@@ -146,7 +164,6 @@ AFRAME.registerComponent("stack-swiper", {
 
   drag(dx) {
     if (this.busy) return;
-
     let max = 0.6;
     let x = Math.max(-max, Math.min(max, dx / 200));
     let rot = (dx / 200) * -12;
@@ -171,6 +188,11 @@ AFRAME.registerComponent("stack-swiper", {
       dur: 180,
       easing: "easeOutQuad"
     });
+  },
+
+  openLink() {
+    const url = LINKS[this.ptr];
+    if (url) window.open(url, "_blank");
   },
 
   pop(dir) {
@@ -210,13 +232,16 @@ AFRAME.registerComponent("stack-swiper", {
 </script>
 
 
-<!-- AR Scene -->
+<!-- ========================================================
+     AR SCENE
+======================================================== -->
 <a-scene
   mindar-image="imageTargetSrc: targets.mind; autoStart: true; uiScanning: yes;"
   embedded
-  cursor="rayOrigin: mouse"
-  raycaster="objects: .clickable"
-  vr-mode-ui="enabled: false">
+  color-space="sRGB"
+  renderer="precision: high; antialias: true"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false">
 
   <a-camera look-controls="enabled:false"></a-camera>
 
